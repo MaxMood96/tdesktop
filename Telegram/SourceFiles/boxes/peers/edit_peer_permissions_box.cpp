@@ -8,13 +8,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "boxes/peers/edit_peer_permissions_box.h"
 
 #include "lang/lang_keys.h"
+#include "history/admin_log/history_admin_log_filter.h"
+#include "core/ui_integration.h"
+#include "data/stickers/data_custom_emoji.h"
 #include "data/data_channel.h"
 #include "data/data_chat.h"
+#include "data/data_session.h"
 #include "ui/effects/toggle_arrow.h"
 #include "ui/wrap/slide_wrap.h"
 #include "ui/wrap/vertical_layout.h"
 #include "ui/layers/generic_box.h"
 #include "ui/painter.h"
+#include "ui/vertical_list.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/checkbox.h"
 #include "ui/widgets/buttons.h"
@@ -34,6 +39,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "settings/settings_common.h"
 #include "styles/style_layers.h"
 #include "styles/style_boxes.h"
+#include "styles/style_chat.h"
 #include "styles/style_info.h"
 #include "styles/style_menu_icons.h"
 #include "styles/style_window.h"
@@ -42,6 +48,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 namespace {
 
 constexpr auto kSlowmodeValues = 7;
+constexpr auto kBoostsUnrestrictValues = 5;
 constexpr auto kSuggestGigagroupThreshold = 199000;
 constexpr auto kForceDisableTooltipDuration = 3 * crl::time(1000);
 
@@ -50,14 +57,20 @@ constexpr auto kForceDisableTooltipDuration = 3 * crl::time(1000);
 	return {};
 }
 
+[[nodiscard]] auto Dependencies(AdminLog::FilterValue::Flags) {
+	using Flag = AdminLog::FilterValue::Flag;
+	return std::vector<std::pair<Flag, Flag>>{};
+}
+
 [[nodiscard]] auto NestedRestrictionLabelsList(
-		Data::RestrictionsSetOptions options) {
+	Data::RestrictionsSetOptions options)
+-> std::vector<NestedEditFlagsLabels<ChatRestrictions>> {
 	using Flag = ChatRestriction;
 
 	auto first = std::vector<RestrictionLabel>{
 		{ Flag::SendOther, tr::lng_rights_chat_send_text(tr::now) },
 	};
-	auto inner = std::vector<RestrictionLabel>{
+	auto media = std::vector<RestrictionLabel>{
 		{ Flag::SendPhotos, tr::lng_rights_chat_photos(tr::now) },
 		{ Flag::SendVideos, tr::lng_rights_chat_videos(tr::now) },
 		{ Flag::SendVideoMessages, tr::lng_rights_chat_video_messages(tr::now) },
@@ -85,9 +98,75 @@ constexpr auto kForceDisableTooltipDuration = 3 * crl::time(1000);
 				&RestrictionLabel::flags),
 			end(second));
 	}
-	return std::vector<NestedEditFlagsLabels<ChatRestrictions>>{
+	return {
 		{ std::nullopt, std::move(first) },
-		{ tr::lng_rights_chat_send_media(), std::move(inner) },
+		{ tr::lng_rights_chat_send_media(), std::move(media) },
+		{ std::nullopt, std::move(second) },
+	};
+}
+
+[[nodiscard]] auto NestedAdminRightLabels(
+	Data::AdminRightsSetOptions options)
+-> std::vector<NestedEditFlagsLabels<ChatAdminRights>> {
+	using Flag = ChatAdminRight;
+
+	if (options.isGroup) {
+		auto first = std::vector<AdminRightLabel>{
+			{ Flag::ChangeInfo, tr::lng_rights_group_info(tr::now) },
+			{ Flag::DeleteMessages, tr::lng_rights_group_delete(tr::now) },
+			{ Flag::BanUsers, tr::lng_rights_group_ban(tr::now) },
+			{ Flag::InviteByLinkOrAdd, options.anyoneCanAddMembers
+				? tr::lng_rights_group_invite_link(tr::now)
+				: tr::lng_rights_group_invite(tr::now) },
+			{ Flag::ManageTopics, tr::lng_rights_group_topics(tr::now) },
+			{ Flag::PinMessages, tr::lng_rights_group_pin(tr::now) },
+		};
+		auto stories = std::vector<AdminRightLabel>{
+			{ Flag::PostStories, tr::lng_rights_channel_post_stories(tr::now) },
+			{ Flag::EditStories, tr::lng_rights_channel_edit_stories(tr::now) },
+			{ Flag::DeleteStories, tr::lng_rights_channel_delete_stories(tr::now) },
+		};
+		auto second = std::vector<AdminRightLabel>{
+			{ Flag::ManageCall, tr::lng_rights_group_manage_calls(tr::now) },
+			{ Flag::Anonymous, tr::lng_rights_group_anonymous(tr::now) },
+			{ Flag::AddAdmins, tr::lng_rights_add_admins(tr::now) },
+		};
+		if (!options.isForum) {
+			first.erase(
+				ranges::remove(
+					first,
+					Flag::ManageTopics | Flag(),
+					&AdminRightLabel::flags),
+				end(first));
+		}
+		return {
+			{ std::nullopt, std::move(first) },
+			{ tr::lng_rights_channel_manage_stories(), std::move(stories) },
+			{ std::nullopt, std::move(second) },
+		};
+	}
+	auto first = std::vector<AdminRightLabel>{
+		{ Flag::ChangeInfo, tr::lng_rights_channel_info(tr::now) },
+	};
+	auto messages = std::vector<AdminRightLabel>{
+		{ Flag::PostMessages, tr::lng_rights_channel_post(tr::now) },
+		{ Flag::EditMessages, tr::lng_rights_channel_edit(tr::now) },
+		{ Flag::DeleteMessages, tr::lng_rights_channel_delete(tr::now) },
+	};
+	auto stories = std::vector<AdminRightLabel>{
+		{ Flag::PostStories, tr::lng_rights_channel_post_stories(tr::now) },
+		{ Flag::EditStories, tr::lng_rights_channel_edit_stories(tr::now) },
+		{ Flag::DeleteStories, tr::lng_rights_channel_delete_stories(tr::now) },
+	};
+	auto second = std::vector<AdminRightLabel>{
+		{ Flag::InviteByLinkOrAdd, tr::lng_rights_group_invite(tr::now) },
+		{ Flag::ManageCall, tr::lng_rights_channel_manage_calls(tr::now) },
+		{ Flag::AddAdmins, tr::lng_rights_add_admins(tr::now) },
+	};
+	return {
+		{ std::nullopt, std::move(first) },
+		{ tr::lng_rights_channel_manage(), std::move(messages) },
+		{ tr::lng_rights_channel_manage_stories(), std::move(stories) },
 		{ std::nullopt, std::move(second) },
 	};
 }
@@ -105,6 +184,10 @@ int SlowmodeDelayByIndex(int index) {
 	case 6: return 60 * 60;
 	}
 	Unexpected("Index in SlowmodeDelayByIndex.");
+}
+
+[[nodiscard]] int BoostsUnrestrictByIndex(int index) {
+	return index + 1;
 }
 
 template <typename CheckboxesMap, typename DependenciesMap>
@@ -501,14 +584,6 @@ template <typename Flags>
 		ApplyDependencies(state->checkViews, dependencies, view);
 	};
 
-	if (descriptor.header) {
-		container->add(
-			object_ptr<Ui::FlatLabel>(
-				container,
-				std::move(descriptor.header),
-				st::rightsHeaderLabel),
-			st::rightsHeaderMargin);
-	}
 	const auto addCheckbox = [&](
 			not_null<Ui::VerticalLayout*> verticalLayout,
 			bool isInner,
@@ -553,7 +628,7 @@ template <typename Flags>
 
 				return checkView;
 			} else {
-				const auto button = Settings::AddButton(
+				const auto button = Settings::AddButtonWithIcon(
 					verticalLayout,
 					rpl::single(entry.label),
 					st,
@@ -712,24 +787,20 @@ void AddSlowmodeLabels(
 	}
 }
 
-Fn<int()> AddSlowmodeSlider(
+rpl::producer<int> AddSlowmodeSlider(
 		not_null<Ui::VerticalLayout*> container,
 		not_null<PeerData*> peer) {
 	using namespace rpl::mappers;
 
 	if (const auto chat = peer->asChat()) {
 		if (!chat->amCreator()) {
-			return [] { return 0; };
+			return rpl::single(0);
 		}
 	}
 	const auto channel = peer->asChannel();
 	auto &lifetime = container->lifetime();
 	const auto secondsCount = lifetime.make_state<rpl::variable<int>>(
 		channel ? channel->slowmodeSeconds() : 0);
-
-	container->add(
-		object_ptr<Ui::BoxContentDivider>(container),
-		{ 0, st::infoProfileSkip, 0, st::infoProfileSkip });
 
 	container->add(
 		object_ptr<Ui::FlatLabel>(
@@ -800,7 +871,157 @@ Fn<int()> AddSlowmodeSlider(
 			st::proxyAboutPadding),
 		style::margins(0, st::infoProfileSkip, 0, st::infoProfileSkip));
 
-	return [=] { return secondsCount->current(); };
+	return secondsCount->value();
+}
+
+void AddBoostsUnrestrictLabels(
+		not_null<Ui::VerticalLayout*> container,
+		not_null<Main::Session*> session) {
+	const auto labels = container->add(
+		object_ptr<Ui::FixedHeightWidget>(container, st::normalFont->height),
+		st::slowmodeLabelsMargin);
+	const auto manager = &session->data().customEmojiManager();
+	const auto one = Ui::Text::SingleCustomEmoji(
+		manager->registerInternalEmoji(
+			st::boostMessageIcon,
+			st::boostMessageIconPadding));
+	const auto many = Ui::Text::SingleCustomEmoji(
+		manager->registerInternalEmoji(
+			st::boostsMessageIcon,
+			st::boostsMessageIconPadding));
+	const auto context = Core::MarkedTextContext{
+		.session = session,
+		.customEmojiRepaint = [] {},
+		.customEmojiLoopLimit = 1,
+	};
+	for (auto i = 0; i != kBoostsUnrestrictValues; ++i) {
+		const auto label = Ui::CreateChild<Ui::FlatLabel>(
+			labels,
+			st::boostsUnrestrictLabel);
+		label->setMarkedText(
+			TextWithEntities(i ? many : one).append(QString::number(i + 1)),
+			context);
+		rpl::combine(
+			labels->widthValue(),
+			label->widthValue()
+		) | rpl::start_with_next([=](int outer, int inner) {
+			const auto skip = st::localStorageLimitMargin;
+			const auto size = st::localStorageLimitSlider.seekSize;
+			const auto available = outer
+				- skip.left()
+				- skip.right()
+				- size.width();
+			const auto shift = (i == 0)
+				? -(size.width() / 2)
+				: (i + 1 == kBoostsUnrestrictValues)
+				? (size.width() - (size.width() / 2) - inner)
+				: (-inner / 2);
+			const auto left = skip.left()
+				+ (size.width() / 2)
+				+ (i * available) / (kBoostsUnrestrictValues - 1)
+				+ shift;
+			label->moveToLeft(left, 0, outer);
+		}, label->lifetime());
+	}
+}
+
+rpl::producer<int> AddBoostsUnrestrictSlider(
+		not_null<Ui::VerticalLayout*> container,
+		not_null<PeerData*> peer) {
+	using namespace rpl::mappers;
+
+	if (const auto chat = peer->asChat()) {
+		if (!chat->amCreator()) {
+			return rpl::single(0);
+		}
+	}
+	const auto channel = peer->asChannel();
+	auto &lifetime = container->lifetime();
+	const auto boostsUnrestrict = lifetime.make_state<rpl::variable<int>>(
+		channel ? channel->boostsUnrestrict() : 0);
+
+	container->add(
+		object_ptr<Ui::BoxContentDivider>(container),
+		{ 0, st::infoProfileSkip, 0, st::infoProfileSkip });
+
+	auto enabled = boostsUnrestrict->value(
+	) | rpl::map(_1 > 0);
+	container->add(object_ptr<Ui::SettingsButton>(
+		container,
+		tr::lng_rights_boosts_no_restrict(),
+		st::defaultSettingsButton
+	))->toggleOn(rpl::duplicate(enabled))->toggledValue(
+	) | rpl::start_with_next([=](bool toggled) {
+		if (toggled && !boostsUnrestrict->current()) {
+			*boostsUnrestrict = 1;
+		} else if (!toggled && boostsUnrestrict->current()) {
+			*boostsUnrestrict = 0;
+		}
+	}, container->lifetime());
+
+	const auto outer = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	outer->toggleOn(rpl::duplicate(enabled), anim::type::normal);
+	outer->finishAnimating();
+
+	const auto inner = outer->entity();
+
+	AddBoostsUnrestrictLabels(inner, &peer->session());
+
+	const auto slider = inner->add(
+		object_ptr<Ui::MediaSlider>(inner, st::localStorageLimitSlider),
+		st::localStorageLimitMargin);
+	slider->resize(st::localStorageLimitSlider.seekSize);
+	slider->setPseudoDiscrete(
+		kBoostsUnrestrictValues,
+		BoostsUnrestrictByIndex,
+		boostsUnrestrict->current(),
+		[=](int boosts) {
+			(*boostsUnrestrict) = boosts;
+		});
+
+	inner->add(
+		object_ptr<Ui::DividerLabel>(
+			inner,
+			object_ptr<Ui::FlatLabel>(
+				inner,
+				rpl::conditional(
+					boostsUnrestrict->value() | rpl::map(_1 > 0),
+					tr::lng_rights_boosts_about_on(),
+					tr::lng_rights_boosts_about()),
+				st::boxDividerLabel),
+			st::proxyAboutPadding),
+		style::margins(0, st::infoProfileSkip, 0, 0));
+
+	return boostsUnrestrict->value();
+}
+
+rpl::producer<int> AddBoostsUnrestrictWrapped(
+		not_null<Ui::VerticalLayout*> container,
+		not_null<PeerData*> peer,
+		rpl::producer<bool> shown) {
+	const auto wrap = container->add(
+		object_ptr<Ui::SlideWrap<Ui::VerticalLayout>>(
+			container,
+			object_ptr<Ui::VerticalLayout>(container)));
+	wrap->toggleOn(rpl::duplicate(shown), anim::type::normal);
+	wrap->finishAnimating();
+
+	auto result = AddBoostsUnrestrictSlider(wrap->entity(), peer);
+	const auto divider = container->add(
+		object_ptr<Ui::SlideWrap<Ui::BoxContentDivider>>(
+			container,
+			object_ptr<Ui::BoxContentDivider>(container),
+			QMargins{ 0, st::infoProfileSkip, 0, st::infoProfileSkip }));
+	divider->toggleOn(rpl::combine(
+		std::move(shown),
+		rpl::duplicate(result),
+		!rpl::mappers::_1 || !rpl::mappers::_2));
+	divider->finishAnimating();
+
+	return result;
 }
 
 void AddSuggestGigagroup(
@@ -908,26 +1129,64 @@ void ShowEditPeerPermissionsBox(
 			disabledByAdminRights,
 			tr::lng_rights_permission_cant_edit(tr::now));
 		if (const auto channel = peer->asChannel()) {
-			if (channel->isPublic()
-				|| (channel->isMegagroup() && channel->linkedChat())) {
+			if (channel->isPublic()) {
 				result.emplace(
 					Flag::ChangeInfo | Flag::PinMessages,
 					tr::lng_rights_permission_unavailable(tr::now));
+			} else if (channel->isMegagroup() && channel->linkedChat()) {
+				result.emplace(
+					Flag::ChangeInfo | Flag::PinMessages,
+					tr::lng_rights_permission_in_discuss(tr::now));
 			}
 		}
 		return result;
 	}();
 
+	Ui::AddSubsectionTitle(
+		inner,
+		tr::lng_rights_default_restrictions_header());
 	auto [checkboxes, getRestrictions, changes] = CreateEditRestrictions(
 		inner,
-		tr::lng_rights_default_restrictions_header(),
 		restrictions,
 		disabledMessages,
 		{ .isForum = peer->isForum() });
 
 	inner->add(std::move(checkboxes));
 
-	const auto getSlowmodeSeconds = AddSlowmodeSlider(inner, peer);
+	struct State {
+		rpl::variable<int> slowmodeSeconds;
+		rpl::variable<int> boostsUnrestrict;
+		rpl::variable<bool> hasSendRestrictions;
+	};
+	static constexpr auto kSendRestrictions = Flag::EmbedLinks
+		| Flag::SendGames
+		| Flag::SendGifs
+		| Flag::SendInline
+		| Flag::SendPolls
+		| Flag::SendStickers
+		| Flag::SendPhotos
+		| Flag::SendVideos
+		| Flag::SendVideoMessages
+		| Flag::SendMusic
+		| Flag::SendVoiceMessages
+		| Flag::SendFiles
+		| Flag::SendOther;
+	const auto state = inner->lifetime().make_state<State>();
+	state->hasSendRestrictions = ((restrictions & kSendRestrictions) != 0)
+		|| (peer->isChannel() && peer->asChannel()->slowmodeSeconds() > 0);
+	state->boostsUnrestrict = AddBoostsUnrestrictWrapped(
+		inner,
+		peer,
+		state->hasSendRestrictions.value());
+	state->slowmodeSeconds = AddSlowmodeSlider(inner, peer);
+	state->hasSendRestrictions = rpl::combine(
+		rpl::single(
+			restrictions
+		) | rpl::then(std::move(changes)),
+		state->slowmodeSeconds.value()
+	) | rpl::map([](ChatRestrictions restrictions, int slowmodeSeconds) {
+		return ((restrictions & kSendRestrictions) != 0) || slowmodeSeconds;
+	});
 
 	if (const auto channel = peer->asChannel()) {
 		if (channel->amCreator()
@@ -943,7 +1202,18 @@ void ShowEditPeerPermissionsBox(
 	AddBannedButtons(inner, navigation, peer);
 
 	box->addButton(tr::lng_settings_save(), [=, rights = getRestrictions] {
-		done({ rights(), getSlowmodeSeconds() });
+		const auto restrictions = rights();
+		const auto slowmodeSeconds = state->slowmodeSeconds.current();
+		const auto hasRestrictions = (slowmodeSeconds > 0)
+			|| ((restrictions & kSendRestrictions) != 0);
+		const auto boostsUnrestrict = hasRestrictions
+			? state->boostsUnrestrict.current()
+			: 0;
+		done({
+			restrictions,
+			slowmodeSeconds,
+			boostsUnrestrict,
+		});
 	});
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 
@@ -1031,47 +1301,15 @@ std::vector<RestrictionLabel> RestrictionLabels(
 
 std::vector<AdminRightLabel> AdminRightLabels(
 		Data::AdminRightsSetOptions options) {
-	using Flag = ChatAdminRight;
-
-	if (options.isGroup) {
-		auto result = std::vector<AdminRightLabel>{
-			{ Flag::ChangeInfo, tr::lng_rights_group_info(tr::now) },
-			{ Flag::DeleteMessages, tr::lng_rights_group_delete(tr::now) },
-			{ Flag::BanUsers, tr::lng_rights_group_ban(tr::now) },
-			{ Flag::InviteByLinkOrAdd, options.anyoneCanAddMembers
-				? tr::lng_rights_group_invite_link(tr::now)
-				: tr::lng_rights_group_invite(tr::now) },
-			{ Flag::ManageTopics, tr::lng_rights_group_topics(tr::now) },
-			{ Flag::PinMessages, tr::lng_rights_group_pin(tr::now) },
-			{ Flag::ManageCall, tr::lng_rights_group_manage_calls(tr::now) },
-			{ Flag::Anonymous, tr::lng_rights_group_anonymous(tr::now) },
-			{ Flag::AddAdmins, tr::lng_rights_add_admins(tr::now) },
-		};
-		if (!options.isForum) {
-			result.erase(
-				ranges::remove(
-					result,
-					Flag::ManageTopics | Flag(),
-					&AdminRightLabel::flags),
-				end(result));
-		}
-		return result;
-	} else {
-		return {
-			{ Flag::ChangeInfo, tr::lng_rights_channel_info(tr::now) },
-			{ Flag::PostMessages, tr::lng_rights_channel_post(tr::now) },
-			{ Flag::EditMessages, tr::lng_rights_channel_edit(tr::now) },
-			{ Flag::DeleteMessages, tr::lng_rights_channel_delete(tr::now) },
-			{ Flag::InviteByLinkOrAdd, tr::lng_rights_group_invite(tr::now) },
-			{ Flag::ManageCall, tr::lng_rights_channel_manage_calls(tr::now) },
-			{ Flag::AddAdmins, tr::lng_rights_add_admins(tr::now) }
-		};
+	auto result = std::vector<AdminRightLabel>();
+	for (const auto &[_, r] : NestedAdminRightLabels(options)) {
+		result.insert(result.end(), r.begin(), r.end());
 	}
+	return result;
 }
 
 EditFlagsControl<ChatRestrictions> CreateEditRestrictions(
 		QWidget *parent,
-		rpl::producer<QString> header,
 		ChatRestrictions restrictions,
 		base::flat_map<ChatRestrictions, QString> disabledMessages,
 		Data::RestrictionsSetOptions options) {
@@ -1080,7 +1318,6 @@ EditFlagsControl<ChatRestrictions> CreateEditRestrictions(
 		widget.data(),
 		NegateRestrictions(restrictions),
 		{
-			.header = std::move(header),
 			.labels = NestedRestrictionLabelsList(options),
 			.disabledMessages = std::move(disabledMessages),
 		});
@@ -1097,7 +1334,6 @@ EditFlagsControl<ChatRestrictions> CreateEditRestrictions(
 
 EditFlagsControl<ChatAdminRights> CreateEditAdminRights(
 		QWidget *parent,
-		rpl::producer<QString> header,
 		ChatAdminRights rights,
 		base::flat_map<ChatAdminRights, QString> disabledMessages,
 		Data::AdminRightsSetOptions options) {
@@ -1106,8 +1342,7 @@ EditFlagsControl<ChatAdminRights> CreateEditAdminRights(
 		widget.data(),
 		rights,
 		{
-			.header = std::move(header),
-			.labels = { { std::nullopt, AdminRightLabels(options) } },
+			.labels = NestedAdminRightLabels(options),
 			.disabledMessages = std::move(disabledMessages),
 		});
 	result.widget = std::move(widget);
@@ -1189,6 +1424,21 @@ EditFlagsControl<PowerSaving::Flags> CreateEditPowerSaving(
 	auto widget = object_ptr<Ui::VerticalLayout>(parent);
 	auto descriptor = Settings::PowerSavingLabels();
 	descriptor.forceDisabledMessage = std::move(forceDisabledMessage);
+	auto result = CreateEditFlags(
+		widget.data(),
+		flags,
+		std::move(descriptor));
+	result.widget = std::move(widget);
+
+	return result;
+}
+
+EditFlagsControl<AdminLog::FilterValue::Flags> CreateEditAdminLogFilter(
+		QWidget *parent,
+		AdminLog::FilterValue::Flags flags,
+		bool isChannel) {
+	auto widget = object_ptr<Ui::VerticalLayout>(parent);
+	auto descriptor = AdminLog::FilterValueLabels(isChannel);
 	auto result = CreateEditFlags(
 		widget.data(),
 		flags,

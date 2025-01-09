@@ -30,7 +30,6 @@ class DocumentMedia;
 } // namespace Data
 
 namespace HistoryView::Reactions {
-class CachedIconFactory;
 struct ChosenReaction;
 enum class AttachSelectorResult;
 } // namespace HistoryView::Reactions
@@ -67,7 +66,10 @@ struct SiblingView;
 enum class SiblingType;
 struct ContentLayout;
 class CaptionFullView;
+class RepostView;
 enum class ReactionsMode;
+class StoryAreaView;
+struct RepostClickHandler;
 
 enum class HeaderLayout {
 	Normal,
@@ -120,22 +122,27 @@ public:
 	[[nodiscard]] Data::FileOrigin fileOrigin() const;
 	[[nodiscard]] TextWithEntities captionText() const;
 	[[nodiscard]] bool skipCaption() const;
+	[[nodiscard]] bool repost() const;
 	void toggleLiked();
 	void showFullCaption();
 	void captionClosing();
 	void captionClosed();
 
+	[[nodiscard]] QMargins repostCaptionPadding() const;
+	void drawRepostInfo(Painter &p, int x, int y, int availableWidth) const;
+	[[nodiscard]] RepostClickHandler lookupRepostHandler(
+		QPoint position) const;
+
 	[[nodiscard]] std::shared_ptr<ChatHelpers::Show> uiShow() const;
 	[[nodiscard]] auto stickerOrEmojiChosen() const
 	-> rpl::producer<ChatHelpers::FileChosen>;
-	[[nodiscard]] auto cachedReactionIconFactory() const
-		-> HistoryView::Reactions::CachedIconFactory &;
 
 	void show(not_null<Data::Story*> story, Data::StoriesContext context);
+	void jumpTo(not_null<Data::Story*> story, Data::StoriesContext context);
 	void ready();
 
 	void updateVideoPlayback(const Player::TrackState &state);
-	[[nodiscard]] ClickHandlerPtr lookupLocationHandler(QPoint point) const;
+	[[nodiscard]] ClickHandlerPtr lookupAreaHandler(QPoint point) const;
 
 	[[nodiscard]] bool subjumpAvailable(int delta) const;
 	[[nodiscard]] bool subjumpFor(int delta);
@@ -151,6 +158,7 @@ public:
 	void changeVolume(float64 volume);
 	void volumeChangeFinished();
 
+	void repaint();
 	void repaintSibling(not_null<Sibling*> sibling);
 	[[nodiscard]] SiblingView sibling(SiblingType type) const;
 
@@ -161,7 +169,7 @@ public:
 	void shareRequested();
 	void deleteRequested();
 	void reportRequested();
-	void togglePinnedRequested(bool pinned);
+	void toggleInProfileRequested(bool inProfile);
 
 	[[nodiscard]] bool ignoreWindowMove(QPoint position) const;
 	void tryProcessKeyInput(not_null<QKeyEvent*> e);
@@ -181,8 +189,9 @@ private:
 	class Unsupported;
 	using ChosenReaction = HistoryView::Reactions::ChosenReaction;
 	struct StoriesList {
-		not_null<UserData*> user;
+		not_null<PeerData*> peer;
 		Data::StoriesIds ids;
+		std::vector<StoryId> sorted;
 		int total = 0;
 
 		friend inline bool operator==(
@@ -197,10 +206,14 @@ private:
 			return peerId != 0;
 		}
 	};
-	struct LocationArea {
+	struct ActiveArea {
+		QRectF original;
+		float64 radiusOriginal = 0.;
 		QRect geometry;
 		float64 rotation = 0.;
+		float64 radius = 0.;
 		ClickHandlerPtr handler;
+		std::unique_ptr<StoryAreaView> view;
 	};
 
 	void initLayout();
@@ -215,7 +228,8 @@ private:
 	void updateContentFaded();
 	void updatePlayingAllowed();
 	void setPlayingAllowed(bool allowed);
-	void rebuildLocationAreas(const Layout &layout) const;
+	void rebuildActiveAreas(const Layout &layout) const;
+	void toggleWeatherMode() const;
 
 	void hideSiblings();
 	void showSiblings(not_null<Main::Session*> session);
@@ -233,10 +247,12 @@ private:
 		-> Fn<void(Data::StoryViews)>;
 
 	[[nodiscard]] bool shown() const;
-	[[nodiscard]] UserData *shownUser() const;
+	[[nodiscard]] PeerData *shownPeer() const;
 	[[nodiscard]] int shownCount() const;
 	[[nodiscard]] StoryId shownId(int index) const;
-	void rebuildFromContext(not_null<UserData*> user, FullStoryId storyId);
+	[[nodiscard]] std::unique_ptr<RepostView> validateRepostView(
+		not_null<Data::Story*> story);
+	void rebuildFromContext(not_null<PeerData*> peer, FullStoryId storyId);
 	void checkMoveByDelta();
 	void loadMoreToList();
 	void preloadNext();
@@ -244,7 +260,9 @@ private:
 		const std::vector<Data::StoriesSourceInfo> &lists,
 		int index);
 
-	void reactionChosen(ReactionsMode mode, ChosenReaction chosen);
+	[[nodiscard]] int repostSkipTop() const;
+	void updateAreas(Data::Story *story);
+	bool reactionChosen(ReactionsMode mode, ChosenReaction chosen);
 
 	const not_null<Delegate*> _delegate;
 
@@ -259,6 +277,7 @@ private:
 	std::unique_ptr<Unsupported> _unsupported;
 	std::unique_ptr<PhotoPlayback> _photoPlayback;
 	std::unique_ptr<CaptionFullView> _captionFullView;
+	std::unique_ptr<RepostView> _repostView;
 
 	Ui::Animations::Simple _contentFadeAnimation;
 	bool _contentFaded = false;
@@ -284,7 +303,12 @@ private:
 	bool _viewed = false;
 
 	std::vector<Data::StoryLocation> _locations;
-	mutable std::vector<LocationArea> _locationAreas;
+	std::vector<Data::SuggestedReaction> _suggestedReactions;
+	std::vector<Data::ChannelPost> _channelPosts;
+	std::vector<Data::UrlArea> _urlAreas;
+	std::vector<Data::WeatherArea> _weatherAreas;
+	mutable std::vector<ActiveArea> _areas;
+	mutable rpl::variable<bool> _weatherInCelsius;
 
 	std::vector<CachedSource> _cachedSourcesList;
 	int _cachedSourceIndex = -1;
@@ -308,14 +332,22 @@ private:
 
 };
 
-[[nodiscard]] Ui::Toast::Config PrepareTogglePinnedToast(
+[[nodiscard]] Ui::Toast::Config PrepareToggleInProfileToast(
+	bool channel,
 	int count,
-	bool pinned);
+	bool inProfile);
+[[nodiscard]] Ui::Toast::Config PrepareTogglePinToast(
+	bool channel,
+	int count,
+	bool pin);
 void ReportRequested(
 	std::shared_ptr<Main::SessionShow> show,
 	FullStoryId id,
 	const style::ReportBox *stOverride = nullptr);
 [[nodiscard]] object_ptr<Ui::BoxContent> PrepareShortInfoBox(
 	not_null<PeerData*> peer);
+[[nodiscard]] ClickHandlerPtr MakeChannelPostHandler(
+	not_null<Main::Session*> session,
+	FullMsgId item);
 
 } // namespace Media::Stories

@@ -7,18 +7,18 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 */
 #include "window/themes/window_theme_preview.h"
 
+#include "dialogs/dialogs_three_state_icon.h"
 #include "lang/lang_keys.h"
 #include "platform/platform_window_title.h"
 #include "ui/text/text_options.h"
 #include "ui/text/text_utilities.h"
-#include "ui/image/image_prepare.h"
 #include "ui/empty_userpic.h"
 #include "ui/emoji_config.h"
 #include "ui/painter.h"
+#include "ui/rect.h"
 #include "ui/chat/chat_theme.h"
 #include "ui/chat/chat_style.h"
 #include "ui/chat/message_bubble.h"
-#include "ui/image/image_prepare.h"
 #include "styles/style_widgets.h"
 #include "styles/style_window.h"
 #include "styles/style_media_view.h"
@@ -31,7 +31,7 @@ namespace Window {
 namespace Theme {
 namespace {
 
-QString fillLetters(const QString &name) {
+[[nodiscard]] QString FillLetters(const QString &name) {
 	QList<QString> letters;
 	QList<int> levels;
 	auto level = 0;
@@ -48,7 +48,7 @@ QString fillLetters(const QString &name) {
 			}
 		} else if (!letterFound && ch->isLetterOrNumber()) {
 			letterFound = true;
-			if (ch + 1 != end && Ui::Text::IsDiac(*(ch + 1))) {
+			if (ch + 1 != end && Ui::Text::IsDiacritic(*(ch + 1))) {
 				letters.push_back(QString(ch, 2));
 				levels.push_back(level);
 				++ch;
@@ -236,7 +236,7 @@ void Generator::addRow(
 	Row row;
 	row.name.setText(st::msgNameStyle, name, Ui::NameTextOptions());
 
-	row.letters = fillLetters(name);
+	row.letters = FillLetters(name);
 
 	row.peerIndex = peerIndex;
 	row.date = date;
@@ -354,25 +354,25 @@ void Generator::generateData() {
 		"Mike Apple",
 		2,
 		"9:00",
-		Ui::Text::PlainLink(QChar(55357)
+		Ui::Text::Colorized(QChar(55357)
 			+ QString()
 			+ QChar(56836)
 			+ " Sticker"));
 	_rows.back().unreadCounter = 2;
 	_rows.back().muted = true;
-	addRow("Evening Club", 1, "8:00", Ui::Text::PlainLink("Eva: Photo"));
+	addRow("Evening Club", 1, "8:00", Ui::Text::Colorized("Eva: Photo"));
 	_rows.back().type = Row::Type::Group;
 	addRow(
 		"Old Pirates",
 		6,
 		"7:00",
-		Ui::Text::PlainLink("Max:").append(" Yo-ho-ho!"));
+		Ui::Text::Colorized("Max:").append(" Yo-ho-ho!"));
 	_rows.back().type = Row::Type::Group;
 	addRow("Max Bright", 3, "6:00", { .text = "How about some coffee?" });
 	_rows.back().status = Status::Received;
 	addRow("Natalie Parker", 4, "5:00", { .text = "OK, great)" });
 	_rows.back().status = Status::Received;
-	addRow("Davy Jones", 5, "4:00", Ui::Text::PlainLink("Keynote.pdf"));
+	addRow("Davy Jones", 5, "4:00", Ui::Text::Colorized("Keynote.pdf"));
 
 	_topBarName.setText(st::msgNameStyle, "Eva Summer", Ui::NameTextOptions());
 	_topBarStatus = "online";
@@ -414,9 +414,9 @@ QImage Generator::generate() {
 	prepare();
 
 	auto result = QImage(
-		_rect.size() * cIntRetinaFactor(),
+		_rect.size() * style::DevicePixelRatio(),
 		QImage::Format_ARGB32_Premultiplied);
-	result.setDevicePixelRatio(cRetinaFactor());
+	result.setDevicePixelRatio(style::DevicePixelRatio());
 	result.fill(st::themePreviewBg->c);
 
 	{
@@ -483,13 +483,17 @@ void Generator::paintHistoryBackground() {
 	}
 	background = std::move(background).convertToFormat(
 		QImage::Format_ARGB32_Premultiplied);
-	background.setDevicePixelRatio(cRetinaFactor());
+	background.setDevicePixelRatio(style::DevicePixelRatio());
 	_p->setClipRect(_history);
 	if (tiled) {
 		auto width = background.width();
 		auto height = background.height();
-		auto repeatTimesX = qCeil(_history.width() * cIntRetinaFactor() / float64(width));
-		auto repeatTimesY = qCeil((_history.height() - fromy) * cIntRetinaFactor() / float64(height));
+		auto repeatTimesX = qCeil(_history.width()
+			* style::DevicePixelRatio()
+			/ float64(width));
+		auto repeatTimesY = qCeil((_history.height() - fromy)
+			* style::DevicePixelRatio()
+			/ float64(height));
 		auto imageForTiled = QImage(
 			width * repeatTimesX,
 			height * repeatTimesY,
@@ -600,7 +604,7 @@ void Generator::paintComposeArea() {
 
 	_p->setClipRect(field);
 	_p->save();
-	_p->setFont(st::historyComposeField.font);
+	_p->setFont(st::historyComposeField.style.font);
 	_p->setPen(st::historyComposeField.placeholderFg[_palette]);
 
 	auto placeholderRect = QRect(
@@ -654,7 +658,7 @@ void Generator::paintDialogs() {
 	_p->save();
 	_p->setClipRect(filter);
 	auto phRect = QRect(filter.x() + st::dialogsFilter.textMargins.left() + st::dialogsFilter.placeholderMargins.left(), filter.y() + st::dialogsFilter.textMargins.top() + st::dialogsFilter.placeholderMargins.top(), filter.width() - st::dialogsFilter.textMargins.left() - st::dialogsFilter.textMargins.right(), filter.height() - st::dialogsFilter.textMargins.top() - st::dialogsFilter.textMargins.bottom());
-	_p->setFont(st::dialogsFilter.font);
+	_p->setFont(st::dialogsFilter.style.font);
 	_p->setPen(st::dialogsFilter.placeholderFg[_palette]);
 	_p->drawText(phRect, tr::lng_dlg_filter(tr::now), QTextOption(st::dialogsFilter.placeholderAlign));
 	_p->restore();
@@ -695,9 +699,15 @@ void Generator::paintRow(const Row &row) {
 
 	auto chatTypeIcon = ([&row]() -> const style::icon * {
 		if (row.type == Row::Type::Group) {
-			return &(row.active ? st::dialogsChatIconActive : (row.selected ? st::dialogsChatIconOver : st::dialogsChatIcon));
+			return &Dialogs::ThreeStateIcon(
+				st::dialogsChatIcon,
+				row.active,
+				row.selected);
 		} else if (row.type == Row::Type::Channel) {
-			return &(row.active ? st::dialogsChannelIconActive : (row.selected ? st::dialogsChannelIconOver : st::dialogsChannelIcon));
+			return &Dialogs::ThreeStateIcon(
+				st::dialogsChannelIcon,
+				row.active,
+				row.selected);
 		}
 		return nullptr;
 	})();
@@ -750,7 +760,10 @@ void Generator::paintRow(const Row &row) {
 		_p->setPen(row.active ? st::dialogsUnreadFgActive[_palette] : (row.selected ? st::dialogsUnreadFgOver[_palette] : st::dialogsUnreadFg[_palette]));
 		_p->drawText(unreadRectLeft + (unreadRectWidth - unreadWidth) / 2, unreadRectTop + textTop + st::dialogsUnreadFont->ascent, counter);
 	} else if (row.pinned) {
-		auto icon = (row.active ? st::dialogsPinnedIconActive[_palette] : (row.selected ? st::dialogsPinnedIconOver[_palette] : st::dialogsPinnedIcon[_palette]));
+		auto icon = Dialogs::ThreeStateIcon(
+			st::dialogsPinnedIcon,
+			row.active,
+			row.selected)[_palette];
 		icon.paint(*_p, x + fullWidth - st.padding.right() - icon.width(), texttop, fullWidth);
 		availableWidth -= icon.width() + st::dialogsUnreadPadding;
 	}
@@ -763,9 +776,15 @@ void Generator::paintRow(const Row &row) {
 
 	auto sendStateIcon = ([&row]() -> const style::icon* {
 		if (row.status == Status::Sent) {
-			return &(row.active ? st::dialogsSentIconActive : (row.selected ? st::dialogsSentIconOver : st::dialogsSentIcon));
+			return &Dialogs::ThreeStateIcon(
+				st::dialogsSentIcon,
+				row.active,
+				row.selected);
 		} else if (row.status == Status::Received) {
-			return &(row.active ? st::dialogsReceivedIconActive : (row.selected ? st::dialogsReceivedIconOver : st::dialogsReceivedIcon));
+			return &Dialogs::ThreeStateIcon(
+				st::dialogsReceivedIcon,
+				row.active,
+				row.selected);
 		}
 		return nullptr;
 	})();
@@ -780,7 +799,12 @@ void Generator::paintRow(const Row &row) {
 void Generator::paintBubble(const Bubble &bubble) {
 	auto height = bubble.height;
 	if (!bubble.replyName.isEmpty()) {
-		height += st::msgReplyPadding.top() + st::msgReplyBarSize.height() + st::msgReplyPadding.bottom();
+		height += st::historyReplyTop
+			+ st::historyReplyPadding.top()
+			+ st::msgServiceNameFont->height
+			+ st::normalFont->height
+			+ st::historyReplyPadding.bottom()
+			+ st::historyReplyBottom;
 	}
 	auto isPhoto = !bubble.photo.isNull();
 
@@ -840,19 +864,45 @@ void Generator::paintBubble(const Bubble &bubble) {
 		trect = trect.marginsRemoved(st::msgPadding);
 	}
 	if (!bubble.replyName.isEmpty()) {
-		auto h = st::msgReplyPadding.top() + st::msgReplyBarSize.height() + st::msgReplyPadding.bottom();
-
+		trect.setY(trect.y() + st::historyReplyTop);
 		auto bar = (bubble.outbg ? st::msgOutReplyBarColor[_palette] : st::msgInReplyBarColor[_palette]);
-		auto rbar = style::rtlrect(trect.x() + st::msgReplyBarPos.x(), trect.y() + st::msgReplyPadding.top() + st::msgReplyBarPos.y(), st::msgReplyBarSize.width(), st::msgReplyBarSize.height(), _rect.width());
-		_p->fillRect(rbar, bar);
+		auto rbar = style::rtlrect(
+			trect.x(),
+			trect.y(),
+			trect.width(),
+			(st::historyReplyPadding.top()
+				+ st::msgServiceNameFont->height
+				+ st::normalFont->height
+				+ st::historyReplyPadding.bottom()),
+			_rect.width());
+		{
+			auto hq = PainterHighQualityEnabler(*_p);
+			_p->setPen(Qt::NoPen);
+			_p->setBrush(bar);
+
+			const auto outline = st::messageTextStyle.blockquote.outline;
+			const auto radius = st::messageTextStyle.blockquote.radius;
+			_p->setOpacity(Ui::kDefaultOutline1Opacity);
+			_p->setClipRect(rbar.x(), rbar.y(), outline, rbar.height());
+			_p->drawRoundedRect(rbar, radius, radius);
+			_p->setOpacity(Ui::kDefaultBgOpacity);
+			_p->setClipRect(
+				rbar.x() + outline,
+				rbar.y(),
+				rbar.width() - outline,
+				rbar.height());
+			_p->drawRoundedRect(rbar, radius, radius);
+		}
+		_p->setOpacity(1.);
+		_p->setClipping(false);
 
 		_p->setPen(bubble.outbg ? st::msgOutServiceFg[_palette] : st::msgInServiceFg[_palette]);
-		bubble.replyName.drawLeftElided(*_p, trect.x() + st::msgReplyBarSkip, trect.y() + st::msgReplyPadding.top(), bubble.width - st::msgReplyBarSkip, _rect.width());
+		bubble.replyName.drawLeftElided(*_p, trect.x() + st::historyReplyPadding.left(), trect.y() + st::historyReplyPadding.top(), bubble.width - st::historyReplyPadding.left() - st::historyReplyPadding.right(), _rect.width());
 
 		_p->setPen(bubble.outbg ? st::historyTextOutFg[_palette] : st::historyTextInFg[_palette]);
-		bubble.replyText.drawLeftElided(*_p, trect.x() + st::msgReplyBarSkip, trect.y() + st::msgReplyPadding.top() + st::msgServiceNameFont->height, bubble.width - st::msgReplyBarSkip, _rect.width());
+		bubble.replyText.drawLeftElided(*_p, trect.x() + st::historyReplyPadding.left(), trect.y() + st::historyReplyPadding.top() + st::msgServiceNameFont->height, bubble.width - st::historyReplyPadding.left() - st::historyReplyPadding.right(), _rect.width());
 
-		trect.setY(trect.y() + h);
+		trect.setY(trect.y() + rbar.height() + st::historyReplyBottom);
 	}
 
 	if (!bubble.text.isEmpty()) {
@@ -948,8 +998,12 @@ void Generator::paintBubble(const Bubble &bubble) {
 	_historyBottom = y - (bubble.attachToTop ? st::msgMarginTopAttached : st::msgMargin.top());
 
 	if (isPhoto) {
-		auto image = bubble.photo.scaled(bubble.photoWidth * cIntRetinaFactor(), bubble.photoHeight * cIntRetinaFactor(), Qt::IgnoreAspectRatio, Qt::SmoothTransformation);
-		image.setDevicePixelRatio(cRetinaFactor());
+		auto image = bubble.photo.scaled(
+			QSize(bubble.photoWidth, bubble.photoHeight)
+				* style::DevicePixelRatio(),
+			Qt::IgnoreAspectRatio,
+			Qt::SmoothTransformation);
+		image.setDevicePixelRatio(style::DevicePixelRatio());
 		_p->drawImage(x, y - bubble.photoHeight, image);
 		_historyBottom -= bubble.photoHeight;
 	}
@@ -972,7 +1026,7 @@ void Generator::paintService(QString text) {
 }
 
 void Generator::paintUserpic(int x, int y, Row::Type type, int index, QString letters) {
-	const auto colorIndex = Ui::EmptyUserpic::ColorIndex(index);
+	const auto colorIndex = Ui::DecideColorIndex(index);
 	const auto colors = Ui::EmptyUserpic::UserpicColor(colorIndex);
 	auto userpic = Ui::EmptyUserpic(colors, letters);
 
@@ -980,7 +1034,7 @@ void Generator::paintUserpic(int x, int y, Row::Type type, int index, QString le
 	auto image = QImage(
 		QSize(size, size) * style::DevicePixelRatio(),
 		QImage::Format_ARGB32_Premultiplied);
-	image.setDevicePixelRatio(cRetinaFactor());
+	image.setDevicePixelRatio(style::DevicePixelRatio());
 	image.fill(Qt::transparent);
 	{
 		Painter p(&image);
@@ -1094,8 +1148,10 @@ void DefaultPreviewWindowTitle(Painter &p, const style::palette &palette, QRect 
 }
 
 void DefaultPreviewWindowFramePaint(QImage &preview, const style::palette &palette, QRect body, int outerWidth) {
-	auto mask = QImage(st::windowShadow.size() * cIntRetinaFactor(), QImage::Format_ARGB32_Premultiplied);
-	mask.setDevicePixelRatio(cRetinaFactor());
+	auto mask = QImage(
+		st::windowShadow.size() * style::DevicePixelRatio(),
+		QImage::Format_ARGB32_Premultiplied);
+	mask.setDevicePixelRatio(style::DevicePixelRatio());
 	{
 		Painter p(&mask);
 		p.setCompositionMode(QPainter::CompositionMode_Source);
@@ -1111,18 +1167,20 @@ void DefaultPreviewWindowFramePaint(QImage &preview, const style::palette &palet
 		currentInt = *lastLineInts;
 		++maxSize;
 	}
-	if (maxSize % cIntRetinaFactor()) {
-		maxSize -= (maxSize % cIntRetinaFactor());
+	if (maxSize % style::DevicePixelRatio()) {
+		maxSize -= (maxSize % style::DevicePixelRatio());
 	}
-	auto size = maxSize / cIntRetinaFactor();
+	auto size = maxSize / style::DevicePixelRatio();
 	auto bottom = size;
 	auto left = size - st::windowShadowShift;
 	auto right = left;
 	auto top = size - 2 * st::windowShadowShift;
 
 	auto sprite = st::windowShadow[palette];
-	auto topLeft = QImage(sprite.size() * cIntRetinaFactor(), QImage::Format_ARGB32_Premultiplied);
-	topLeft.setDevicePixelRatio(cRetinaFactor());
+	auto topLeft = QImage(
+		sprite.size() * style::DevicePixelRatio(),
+		QImage::Format_ARGB32_Premultiplied);
+	topLeft.setDevicePixelRatio(style::DevicePixelRatio());
 	{
 		Painter p(&topLeft);
 		p.setCompositionMode(QPainter::CompositionMode_Source);
@@ -1137,16 +1195,74 @@ void DefaultPreviewWindowFramePaint(QImage &preview, const style::palette &palet
 	Painter p(&preview);
 	DefaultPreviewWindowTitle(p, palette, body, outerWidth);
 
-	auto inner = QRect(body.x(), body.y() - st::defaultWindowTitle.height, body.width(), body.height() + st::defaultWindowTitle.height);
-	p.setClipRegion(QRegion(inner.marginsAdded(QMargins(size, size, size, size))) - inner);
+	auto inner = QRect(
+		body.x(),
+		body.y() - st::defaultWindowTitle.height,
+		body.width(),
+		body.height() + st::defaultWindowTitle.height);
+	p.setClipRegion(QRegion(inner + Margins(size)) - inner);
 	p.drawImage(inner.x() - left, inner.y() - top, topLeft);
-	p.drawImage(inner.x() + inner.width() + right - width, inner.y() - top, topRight);
-	p.drawImage(inner.x() + inner.width() + right - width, inner.y() + inner.height() + bottom - height, bottomRight);
-	p.drawImage(inner.x() - left, inner.y() + inner.height() + bottom - height, bottomLeft);
-	p.drawImage(QRect(inner.x() - left, inner.y() - top + height, left, top + inner.height() + bottom - 2 * height), topLeft, QRect(0, topLeft.height() - cIntRetinaFactor(), left * cIntRetinaFactor(), cIntRetinaFactor()));
-	p.drawImage(QRect(inner.x() - left + width, inner.y() - top, left + inner.width() + right - 2 * width, top), topLeft, QRect(topLeft.width() - cIntRetinaFactor(), 0, cIntRetinaFactor(), top * cIntRetinaFactor()));
-	p.drawImage(QRect(inner.x() + inner.width(), inner.y() - top + height, right, top + inner.height() + bottom - 2 * height), topRight, QRect(topRight.width() - right * cIntRetinaFactor(), topRight.height() - cIntRetinaFactor(), right * cIntRetinaFactor(), cIntRetinaFactor()));
-	p.drawImage(QRect(inner.x() - left + width, inner.y() + inner.height(), left + inner.width() + right - 2 * width, bottom), bottomRight, QRect(0, bottomRight.height() - bottom * cIntRetinaFactor(), cIntRetinaFactor(), bottom * cIntRetinaFactor()));
+	p.drawImage(
+		inner.x() + inner.width() + right - width,
+		inner.y() - top,
+		topRight);
+	p.drawImage(
+		inner.x() + inner.width() + right - width,
+		inner.y() + inner.height() + bottom - height,
+		bottomRight);
+	p.drawImage(
+		inner.x() - left,
+		inner.y() + inner.height() + bottom - height,
+		bottomLeft);
+	p.drawImage(
+		QRect(
+			inner.x() - left,
+			inner.y() - top + height,
+			left,
+			top + inner.height() + bottom - 2 * height),
+		topLeft,
+		QRect(
+			0,
+			topLeft.height() - style::DevicePixelRatio(),
+			left * style::DevicePixelRatio(),
+			style::DevicePixelRatio()));
+	p.drawImage(
+		QRect(
+			inner.x() - left + width,
+			inner.y() - top,
+			left + inner.width() + right - 2 * width,
+			top),
+		topLeft,
+		QRect(
+			topLeft.width() - style::DevicePixelRatio(),
+			0,
+			style::DevicePixelRatio(),
+			top * style::DevicePixelRatio()));
+	p.drawImage(
+		QRect(
+			inner.x() + inner.width(),
+			inner.y() - top + height,
+			right,
+			top + inner.height() + bottom - 2 * height),
+		topRight,
+		QRect(
+			topRight.width() - right * style::DevicePixelRatio(),
+			topRight.height() - style::DevicePixelRatio(),
+			right * style::DevicePixelRatio(),
+			style::DevicePixelRatio()));
+	p.drawImage(
+		QRect(
+			inner.x() - left + width,
+			inner.y() + inner.height(),
+			left + inner.width() + right - 2 * width,
+			bottom),
+		bottomRight,
+		QRect(
+			0,
+			bottomRight.height() - bottom * style::DevicePixelRatio(),
+			style::DevicePixelRatio(),
+			bottom * style::DevicePixelRatio()));
+
 }
 
 } // namespace Theme

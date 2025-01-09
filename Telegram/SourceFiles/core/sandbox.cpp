@@ -20,6 +20,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "core/launcher.h"
 #include "core/local_url_handlers.h"
 #include "core/update_checker.h"
+#include "core/deadlock_detector.h"
 #include "base/timer.h"
 #include "base/concurrent_timer.h"
 #include "base/invoke_queued.h"
@@ -27,7 +28,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "base/qthelp_regex.h"
 #include "ui/ui_utility.h"
 #include "ui/effects/animations.h"
-#include "ui/platform/ui_platform_utility.h"
 
 #include <QtCore/QLockFile>
 #include <QtGui/QSessionManager>
@@ -82,7 +82,6 @@ bool Sandbox::QuitOnStartRequested = false;
 Sandbox::Sandbox(int &argc, char **argv)
 : QApplication(argc, argv)
 , _mainThreadId(QThread::currentThreadId()) {
-	setQuitOnLastWindowClosed(false);
 }
 
 int Sandbox::start() {
@@ -159,16 +158,9 @@ int Sandbox::start() {
 
 	// https://github.com/telegramdesktop/tdesktop/issues/948
 	// and https://github.com/telegramdesktop/tdesktop/issues/5022
-	const auto restartHint = [](QSessionManager &manager) {
+	connect(this, &QGuiApplication::saveStateRequest, [](auto &manager) {
 		manager.setRestartHint(QSessionManager::RestartNever);
-	};
-
-	connect(
-		this,
-		&QGuiApplication::saveStateRequest,
-		this,
-		restartHint,
-		Qt::DirectConnection);
+	});
 
 	LOG(("Connecting local socket to %1...").arg(_localServerName));
 	_localSocket.connectToServer(_localServerName);
@@ -198,6 +190,13 @@ void Sandbox::launchApplication() {
 		}
 		setupScreenScale();
 
+#ifndef _DEBUG
+		if (Logs::DebugEnabled()) {
+			using DeadlockDetector::PingThread;
+			_deadlockDetector = std::make_unique<PingThread>(this);
+		}
+#endif // !_DEBUG
+
 		_application = std::make_unique<Application>();
 
 		// Ideally this should go to constructor.
@@ -216,7 +215,7 @@ void Sandbox::setupScreenScale() {
 	const auto logEnv = [](const char *name) {
 		const auto value = qEnvironmentVariable(name);
 		if (!value.isEmpty()) {
-			LOG(("%1: %2").arg(name).arg(value));
+			LOG(("%1: %2").arg(name, value));
 		}
 	};
 	logEnv("QT_DEVICE_PIXEL_RATIO");
@@ -229,12 +228,7 @@ void Sandbox::setupScreenScale() {
 	logEnv("QT_USE_PHYSICAL_DPI");
 	logEnv("QT_FONT_DPI");
 
-	// Like Qt::HighDpiScaleFactorRoundingPolicy::RoundPreferFloor.
-	// Round up for .75 and higher. This favors "small UI" over "large UI".
-	const auto roundedRatio = ((ratio - qFloor(ratio)) < 0.75)
-		? qFloor(ratio)
-		: qCeil(ratio);
-	const auto useRatio = std::clamp(roundedRatio, 1, 3);
+	const auto useRatio = std::clamp(qCeil(ratio), 1, 3);
 	style::SetDevicePixelRatio(useRatio);
 
 	const auto screen = Sandbox::primaryScreen();
@@ -261,12 +255,19 @@ void Sandbox::setupScreenScale() {
 Sandbox::~Sandbox() = default;
 
 bool Sandbox::event(QEvent *e) {
-	if (e->type() == QEvent::Quit && !Quitting()) {
+	if (e->type() == QEvent::Quit) {
+		if (Quitting()) {
+			return QCoreApplication::event(e);
+		}
 		Quit(QuitReason::QtQuitEvent);
 		e->ignore();
 		return false;
 	} else if (e->type() == QEvent::Close) {
 		Quit();
+	} else if (e->type() == DeadlockDetector::PingPongEvent::Type()) {
+		postEvent(
+			static_cast<DeadlockDetector::PingPongEvent*>(e)->sender(),
+			new DeadlockDetector::PingPongEvent(this));
 	}
 	return QApplication::event(e);
 }
@@ -581,18 +582,9 @@ void Sandbox::registerEnterFromEventLoop() {
 }
 
 bool Sandbox::notifyOrInvoke(QObject *receiver, QEvent *e) {
-	const auto type = e->type();
-	if (type == base::InvokeQueuedEvent::Type()) {
+	if (e->type() == base::InvokeQueuedEvent::Type()) {
 		static_cast<base::InvokeQueuedEvent*>(e)->invoke();
 		return true;
-	} else if (receiver == this) {
-		if (type == QEvent::ApplicationDeactivate) {
-			if (Ui::Platform::SkipApplicationDeactivateEvent()) {
-				return true;
-			}
-		} else if (type == QEvent::ApplicationActivate) {
-			Ui::Platform::GotApplicationActivateEvent();
-		}
 	}
 	return QApplication::notify(receiver, e);
 }
@@ -628,7 +620,7 @@ void Sandbox::processPostponedCalls(int level) {
 bool Sandbox::nativeEventFilter(
 		const QByteArray &eventType,
 		void *message,
-		base::NativeEventResult *result) {
+		native_event_filter_result *result) {
 	registerEnterFromEventLoop();
 	return false;
 }

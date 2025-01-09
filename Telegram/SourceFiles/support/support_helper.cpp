@@ -18,7 +18,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history.h"
 #include "boxes/abstract_box.h"
 #include "ui/toast/toast.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/chat/attach/attach_prepare.h"
 #include "ui/text/format_values.h"
 #include "ui/text/text_entity.h"
@@ -88,7 +88,7 @@ EditInfoBox::EditInfoBox(
 	_field->setInstantReplaces(Ui::InstantReplaces::Default());
 	_field->setInstantReplacesEnabled(
 		Core::App().settings().replaceEmojiValue());
-	_field->setMarkdownReplacesEnabled(rpl::single(true));
+	_field->setMarkdownReplacesEnabled(true);
 	_field->setEditLinkCallback(
 		DefaultEditLinkCallback(controller->uiShow(), _field));
 }
@@ -109,8 +109,11 @@ void EditInfoBox::prepare() {
 	addButton(tr::lng_settings_save(), save);
 	addButton(tr::lng_cancel(), [=] { closeBox(); });
 
-	connect(_field, &Ui::InputField::submitted, save);
-	connect(_field, &Ui::InputField::cancelled, [=] { closeBox(); });
+	_field->submits() | rpl::start_with_next(save, _field->lifetime());
+	_field->cancelled(
+	) | rpl::start_with_next([=] {
+		closeBox();
+	}, _field->lifetime());
 	Ui::Emoji::SuggestionsController::Init(
 		getDelegate()->outerContainer(),
 		_field,
@@ -156,10 +159,9 @@ Data::Draft OccupiedDraft(const QString &normalizedName) {
 			+ QString::number(OccupationTag())
 			+ ";n:"
 			+ normalizedName },
-		MsgId(0), // replyTo
-		kTopicRootId,
+		FullReplyTo(),
 		MessageCursor(),
-		Data::PreviewState::Allowed
+		Data::WebPageDraft()
 	};
 }
 

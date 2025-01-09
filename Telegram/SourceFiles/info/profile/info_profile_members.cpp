@@ -19,7 +19,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "info/info_memento.h"
 #include "ui/widgets/labels.h"
 #include "ui/widgets/buttons.h"
-#include "ui/widgets/input_fields.h"
+#include "ui/widgets/fields/input_field.h"
 #include "ui/widgets/scroll_area.h"
 #include "ui/wrap/padding_wrap.h"
 #include "ui/text/text_utilities.h" // Ui::Text::ToUpper
@@ -457,16 +457,6 @@ void Members::peerListAddSelectedRowInBunch(not_null<PeerListRow*> row) {
 }
 
 void Members::peerListFinishSelectedRowsBunch() {
-}
-
-void Members::peerListShowBox(
-		object_ptr<Ui::BoxContent> content,
-		Ui::LayerOptions options) {
-	_show->showBox(std::move(content), options);
-}
-
-void Members::peerListHideLayer() {
-	_show->hideLayer();
 }
 
 std::shared_ptr<Main::SessionShow> Members::peerListUiShow() {

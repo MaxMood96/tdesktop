@@ -13,9 +13,9 @@ class History;
 enum class SendMediaType;
 
 namespace Api {
+struct MessageToSend;
 struct SendAction;
 struct SendOptions;
-struct MessageToSend;
 } // namespace Api
 
 namespace Data {
@@ -38,6 +38,10 @@ namespace Main {
 class Session;
 } // namespace Main
 
+namespace SendMenu {
+struct Details;
+} // namespace SendMenu
+
 namespace Ui {
 struct PreparedList;
 class SendFilesWay;
@@ -49,7 +53,7 @@ namespace Media::Stories {
 class Controller;
 
 struct ReplyAreaData {
-	UserData *user = nullptr;
+	PeerData *peer = nullptr;
 	StoryId id = 0;
 
 	friend inline auto operator<=>(ReplyAreaData, ReplyAreaData) = default;
@@ -64,7 +68,7 @@ public:
 	void show(
 		ReplyAreaData data,
 		rpl::producer<Data::ReactionId> likedValue);
-	void sendReaction(const Data::ReactionId &id);
+	bool sendReaction(const Data::ReactionId &id);
 
 	[[nodiscard]] bool focused() const;
 	[[nodiscard]] rpl::producer<bool> focusedValue() const;
@@ -84,7 +88,7 @@ private:
 	[[nodiscard]] Main::Session &session() const;
 	[[nodiscard]] not_null<History*> history() const;
 
-	void send(
+	bool send(
 		Api::MessageToSend message,
 		Api::SendOptions options,
 		bool skipToast = false);
@@ -114,10 +118,9 @@ private:
 		bool ctrlShiftEnter);
 	void finishSending(bool skipToast = false);
 
-	void sendExistingDocument(not_null<DocumentData*> document);
 	bool sendExistingDocument(
 		not_null<DocumentData*> document,
-		Api::SendOptions options,
+		Api::MessageToSend messageToSend,
 		std::optional<MsgId> localId);
 	void sendExistingPhoto(not_null<PhotoData*> photo);
 	bool sendExistingPhoto(
@@ -141,14 +144,19 @@ private:
 	void sendVoice(VoiceToSend &&data);
 	void chooseAttach(std::optional<bool> overrideSendImagesAsPhotos);
 
+	[[nodiscard]] Fn<SendMenu::Details()> sendMenuDetails() const;
+
 	void showPremiumToast(not_null<DocumentData*> emoji);
+	[[nodiscard]] bool showSlowmodeError();
 
 	const not_null<Controller*> _controller;
+	rpl::variable<bool> _isComment;
+
 	const std::unique_ptr<HistoryView::ComposeControls> _controls;
 	std::unique_ptr<Cant> _cant;
 
 	ReplyAreaData _data;
-	base::has_weak_ptr _shownUserGuard;
+	base::has_weak_ptr _shownPeerGuard;
 	bool _chooseAttachRequest = false;
 	rpl::variable<bool> _choosingAttach;
 

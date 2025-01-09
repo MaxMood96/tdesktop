@@ -24,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "data/data_peer_values.h"
 #include "data/data_document.h"
 #include "styles/style_info.h"
+#include "styles/style_overview.h"
 
 namespace Info::Media {
 namespace {
@@ -31,32 +32,6 @@ namespace {
 constexpr auto kPreloadedScreensCount = 4;
 constexpr auto kPreloadedScreensCountFull
 	= kPreloadedScreensCount + 1 + kPreloadedScreensCount;
-
-[[nodiscard]] int MinItemHeight(Type type, int width) {
-	auto &songSt = st::overviewFileLayout;
-
-	switch (type) {
-	case Type::Photo:
-	case Type::GIF:
-	case Type::Video:
-	case Type::RoundFile: {
-		auto itemsLeft = st::infoMediaSkip;
-		auto itemsInRow = (width - itemsLeft)
-			/ (st::infoMediaMinGridSize + st::infoMediaSkip);
-		return (st::infoMediaMinGridSize + st::infoMediaSkip) / itemsInRow;
-	} break;
-
-	case Type::RoundVoiceFile:
-		return songSt.songPadding.top() + songSt.songThumbSize + songSt.songPadding.bottom() + st::lineWidth;
-	case Type::File:
-		return songSt.filePadding.top() + songSt.fileThumbSize + songSt.filePadding.bottom() + st::lineWidth;
-	case Type::MusicFile:
-		return songSt.songPadding.top() + songSt.songThumbSize + songSt.songPadding.bottom();
-	case Type::Link:
-		return st::linksPhotoSize + st::linksMargin.top() + st::linksMargin.bottom() + st::linksBorder;
-	}
-	Unexpected("Type in MinItemHeight()");
-}
 
 } // namespace
 

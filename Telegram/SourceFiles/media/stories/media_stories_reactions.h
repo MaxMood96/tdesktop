@@ -15,6 +15,8 @@ class DocumentMedia;
 struct ReactionId;
 class Session;
 class Story;
+struct SuggestedReaction;
+struct WeatherArea;
 } // namespace Data
 
 namespace HistoryView::Reactions {
@@ -38,6 +40,16 @@ class Controller;
 enum class ReactionsMode {
 	Message,
 	Reaction,
+};
+
+class StoryAreaView {
+public:
+	virtual ~StoryAreaView() = default;
+
+	virtual void setAreaGeometry(QRect geometry, float64 radius) = 0;
+	virtual void updateReactionsCount(int count) = 0;
+	virtual void playEffect() = 0;
+	virtual bool contains(QPoint point) = 0;
 };
 
 class Reactions final {
@@ -64,12 +76,24 @@ public:
 	void hide();
 	void outsidePressed();
 	void toggleLiked();
+	void applyLike(Data::ReactionId id);
 	void ready();
+
+	[[nodiscard]] auto makeSuggestedReactionWidget(
+		const Data::SuggestedReaction &reaction)
+	-> std::unique_ptr<StoryAreaView>;
+	[[nodiscard]] auto makeWeatherAreaWidget(
+		const Data::WeatherArea &data,
+		rpl::producer<bool> weatherInCelsius)
+	-> std::unique_ptr<StoryAreaView>;
 
 	void setReplyFieldState(
 		rpl::producer<bool> focused,
 		rpl::producer<bool> hasSendText);
 	void attachToReactionButton(not_null<Ui::RpWidget*> button);
+	void setReactionIconWidget(Ui::RpWidget *widget);
+
+	void animateAndProcess(Chosen &&chosen);
 
 	using AttachStripResult = HistoryView::Reactions::AttachSelectorResult;
 	[[nodiscard]] AttachStripResult attachToMenu(
@@ -78,8 +102,6 @@ public:
 
 private:
 	class Panel;
-
-	void animateAndProcess(Chosen &&chosen);
 
 	void assignLikedId(Data::ReactionId id);
 	[[nodiscard]] Fn<void(Ui::ReactionFlyCenter)> setLikedIdIconInit(
@@ -110,7 +132,7 @@ private:
 	bool _replyFocused = false;
 	bool _hasSendText = false;
 
-	Ui::RpWidget *_likeButton = nullptr;
+	Ui::RpWidget *_likeIconWidget = nullptr;
 	rpl::variable<Data::ReactionId> _liked;
 	base::has_weak_ptr _likeIconGuard;
 	std::unique_ptr<Ui::RpWidget> _likeIcon;

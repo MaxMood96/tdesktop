@@ -21,13 +21,14 @@ struct phrase;
 enum lngtag_count : int;
 
 namespace Data {
-struct SubscriptionOption;
+struct PremiumSubscriptionOption;
 } // namespace Data
 
 namespace style {
 struct RoundImageCheckbox;
 struct PremiumOption;
 struct TextStyle;
+struct PremiumBubble;
 } // namespace style
 
 namespace Ui {
@@ -40,15 +41,9 @@ namespace Premium {
 
 inline constexpr auto kLimitRowRatio = 0.5;
 
-void AddBubbleRow(
-	not_null<Ui::VerticalLayout*> parent,
-	rpl::producer<> showFinishes,
-	int min,
-	int current,
-	int max,
-	bool premiumPossible,
-	std::optional<tr::phrase<lngtag_count>> phrase,
-	const style::icon *icon);
+[[nodiscard]] QString Svg();
+[[nodiscard]] QByteArray ColorizedSvg(const QGradientStops &gradientStops);
+[[nodiscard]] QImage GenerateStarForLightTopBar(QRectF rect);
 
 void AddLimitRow(
 	not_null<Ui::VerticalLayout*> parent,
@@ -64,6 +59,26 @@ void AddLimitRow(
 	std::optional<tr::phrase<lngtag_count>> phrase,
 	int min = 0,
 	float64 ratio = kLimitRowRatio);
+
+struct LimitRowLabels {
+	rpl::producer<QString> leftLabel;
+	rpl::producer<QString> leftCount;
+	rpl::producer<QString> rightLabel;
+	rpl::producer<QString> rightCount;
+};
+
+struct LimitRowState {
+	float64 ratio = 0.;
+	bool animateFromZero = false;
+	bool dynamic = false;
+};
+
+void AddLimitRow(
+	not_null<Ui::VerticalLayout*> parent,
+	const style::PremiumLimits &st,
+	LimitRowLabels labels,
+	rpl::producer<LimitRowState> state,
+	const style::margins &padding);
 
 struct AccountsRowArgs final {
 	std::shared_ptr<Ui::RadiobuttonGroup> group;
@@ -86,6 +101,12 @@ void AddAccountsRow(
 [[nodiscard]] QGradientStops LockGradientStops();
 [[nodiscard]] QGradientStops FullHeightGradientStops();
 [[nodiscard]] QGradientStops GiftGradientStops();
+[[nodiscard]] QGradientStops CreditsIconGradientStops();
+
+[[nodiscard]] QLinearGradient ComputeGradient(
+	not_null<QWidget*> content,
+	int left,
+	int width);
 
 struct ListEntry final {
 	rpl::producer<QString> title;
@@ -103,7 +124,7 @@ void ShowListBox(
 void AddGiftOptions(
 	not_null<Ui::VerticalLayout*> parent,
 	std::shared_ptr<Ui::RadiobuttonGroup> group,
-	std::vector<Data::SubscriptionOption> gifts,
+	std::vector<Data::PremiumSubscriptionOption> gifts,
 	const style::PremiumOption &st,
 	bool topBadges = false);
 

@@ -69,7 +69,8 @@ ReactionFlyAnimation::ReactionFlyAnimation(
 , _repaint(std::move(repaint))
 , _flyFrom(args.flyFrom)
 , _scaleOutDuration(args.scaleOutDuration)
-, _scaleOutTarget(args.scaleOutTarget) {
+, _scaleOutTarget(args.scaleOutTarget)
+, _forceFirstFrame(args.forceFirstFrame) {
 	const auto &list = owner->list(::Data::Reactions::Type::All);
 	auto centerIcon = (DocumentData*)nullptr;
 	auto aroundAnimation = (DocumentData*)nullptr;
@@ -85,6 +86,11 @@ ReactionFlyAnimation::ReactionFlyAnimation(
 		_customSize = esize;
 		_centerSizeMultiplier = _customSize / float64(size);
 		aroundAnimation = owner->chooseGenericAnimation(document);
+	} else if (args.id.paid()) {
+		const auto fake = owner->lookupPaid();
+		centerIcon = fake->centerIcon;
+		aroundAnimation = owner->choosePaidReactionAnimation();
+		_centerSizeMultiplier = 0.5;
 	} else {
 		const auto i = ranges::find(list, args.id, &::Data::Reaction::id);
 		if (i == end(list)/* || !i->centerIcon*/) {
@@ -114,9 +120,9 @@ ReactionFlyAnimation::ReactionFlyAnimation(
 		});
 		return true;
 	};
-	generateMiniCopies(size + size / 2);
+	generateMiniCopies(size + size / 2, args.miniCopyMultiplier);
 	if (args.effectOnly) {
-		_custom = nullptr;
+		_effectOnly = true;
 	} else if (!_custom && !resolve(_center, centerIcon, size)) {
 		return;
 	}
@@ -227,6 +233,9 @@ void ReactionFlyAnimation::paintCenterFrame(
 		QRect target,
 		const QColor &colored,
 		crl::time now) const {
+	if (_effectOnly) {
+		return;
+	}
 	const auto size = QSize(
 		int(base::SafeRound(target.width() * _centerSizeMultiplier)),
 		int(base::SafeRound(target.height() * _centerSizeMultiplier)));
@@ -248,6 +257,7 @@ void ReactionFlyAnimation::paintCenterFrame(
 				target.x() + (target.width() - _customSize) / 2,
 				target.y() + (target.height() - _customSize) / 2),
 			.scaled = scaled,
+			.internal = { .forceFirstFrame = _forceFirstFrame },
 		});
 	}
 }
@@ -275,6 +285,7 @@ void ReactionFlyAnimation::paintMiniCopies(
 		.size = size,
 		.now = now,
 		.scaled = true,
+		.internal = { .forceFirstFrame = _forceFirstFrame },
 	};
 	for (const auto &mini : _miniCopies) {
 		if (progress >= mini.duration) {
@@ -298,7 +309,9 @@ void ReactionFlyAnimation::paintMiniCopies(
 	}
 }
 
-void ReactionFlyAnimation::generateMiniCopies(int size) {
+void ReactionFlyAnimation::generateMiniCopies(
+		int size,
+		float64 miniCopyMultiplier) {
 	if (!_custom) {
 		return;
 	}
@@ -313,17 +326,19 @@ void ReactionFlyAnimation::generateMiniCopies(int size) {
 	};
 	_miniCopies.reserve(kMiniCopies);
 	for (auto i = 0; i != kMiniCopies; ++i) {
-		const auto maxScale = kMiniCopiesMaxScaleMin
+		const auto scale = kMiniCopiesMaxScaleMin
 			+ (kMiniCopiesMaxScaleMax - kMiniCopiesMaxScaleMin) * random();
+		const auto maxScale = scale * miniCopyMultiplier;
 		const auto duration = between(
 			kMiniCopiesDurationMin,
 			kMiniCopiesDurationMax);
 		const auto maxSize = int(std::ceil(maxScale * _customSize));
 		const auto maxHalf = (maxSize + 1) / 2;
+		const auto flyUpTill = std::max(size - maxHalf, size / 4 + 1);
 		_miniCopies.push_back({
 			.maxScale = maxScale,
 			.duration = duration / float64(kMiniCopiesDurationMax),
-			.flyUp = between(size / 4, size - maxHalf),
+			.flyUp = between(size / 4, flyUpTill),
 			.finalX = between(-size, size),
 			.finalY = between(size - (size / 4), size),
 		});

@@ -23,6 +23,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/text/text_utilities.h"
 #include "ui/boxes/calendar_box.h"
 #include "platform/platform_specific.h"
+#include "core/application.h"
 #include "core/file_utilities.h"
 #include "base/unixtime.h"
 #include "main/main_session.h"
@@ -75,7 +76,10 @@ void ChooseFormatBox(
 	box->setTitle(tr::lng_export_option_choose_format());
 	addFormatOption(tr::lng_export_option_html(tr::now), Format::Html);
 	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
-	box->addButton(tr::lng_settings_save(), [=] { done(group->value()); });
+	addFormatOption(
+		tr::lng_export_option_html_and_json(tr::now),
+		Format::HtmlAndJson);
+	box->addButton(tr::lng_settings_save(), [=] { done(group->current()); });
 	box->addButton(tr::lng_cancel(), [=] { box->closeBox(); });
 }
 
@@ -280,6 +284,7 @@ void SettingsWidget::setupPathAndFormat(
 	addLocationLabel(container);
 	addFormatOption(tr::lng_export_option_html(tr::now), Format::Html);
 	addFormatOption(tr::lng_export_option_json(tr::now), Format::Json);
+	addFormatOption(tr::lng_export_option_html_and_json(tr::now), Format::HtmlAndJson);
 }
 
 void SettingsWidget::addLocationLabel(
@@ -290,7 +295,9 @@ void SettingsWidget::addLocationLabel(
 	}) | rpl::distinct_until_changed(
 	) | rpl::map([=](const QString &path) {
 		const auto text = IsDefaultPath(_session, path)
+			? Core::App().canReadDefaultDownloadPath()
 			? u"Downloads/"_q + File::DefaultDownloadPathFolder(_session)
+			: tr::lng_download_path_temp(tr::now)
 			: path;
 		return Ui::Text::Link(
 			QDir::toNativeSeparators(text),
@@ -337,7 +344,9 @@ void SettingsWidget::addFormatAndLocationLabel(
 	}) | rpl::distinct_until_changed(
 	) | rpl::map([=](const QString &path) {
 		const auto text = IsDefaultPath(_session, path)
+			? Core::App().canReadDefaultDownloadPath()
 			? u"Downloads/"_q + File::DefaultDownloadPathFolder(_session)
+			: tr::lng_download_path_temp(tr::now)
 			: path;
 		return Ui::Text::Link(
 			QDir::toNativeSeparators(text),
@@ -347,7 +356,11 @@ void SettingsWidget::addFormatAndLocationLabel(
 		return data.format;
 	}) | rpl::distinct_until_changed(
 	) | rpl::map([](Format format) {
-		const auto text = (format == Format::Html) ? "HTML" : "JSON";
+		const auto text = (format == Format::Html)
+			? "HTML"
+			: (format == Format::Json)
+			? "JSON"
+			: tr::lng_export_option_html_and_json(tr::now);
 		return Ui::Text::Link(text, u"internal:edit_format"_q);
 	});
 	const auto label = container->add(

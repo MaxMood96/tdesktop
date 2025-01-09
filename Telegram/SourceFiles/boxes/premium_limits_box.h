@@ -42,7 +42,8 @@ void FilterLinksLimitBox(
 	not_null<Main::Session*> session);
 void FiltersLimitBox(
 	not_null<Ui::GenericBox*> box,
-	not_null<Main::Session*> session);
+	not_null<Main::Session*> session,
+	std::optional<int> filtersCountOverride);
 void ShareableFiltersLimitBox(
 	not_null<Ui::GenericBox*> box,
 	not_null<Main::Session*> session);
@@ -59,6 +60,9 @@ void PinsLimitBox(
 void ForumPinsLimitBox(
 	not_null<Ui::GenericBox*> box,
 	not_null<Data::Forum*> forum);
+void SublistsPinsLimitBox(
+	not_null<Ui::GenericBox*> box,
+	not_null<Main::Session*> session);
 void CaptionLimitBox(
 	not_null<Ui::GenericBox*> box,
 	not_null<Main::Session*> session,

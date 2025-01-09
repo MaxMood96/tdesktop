@@ -9,7 +9,10 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 
 #include "base/unixtime.h"
 #include "chat_helpers/compose/compose_show.h"
-#include "data/data_user.h"
+#include "core/ui_integration.h"
+#include "data/stickers/data_custom_emoji.h"
+#include "data/data_peer.h"
+#include "data/data_session.h"
 #include "media/stories/media_stories_controller.h"
 #include "lang/lang_keys.h"
 #include "ui/controls/userpic_button.h"
@@ -23,6 +26,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "ui/wrap/fade_wrap.h"
 #include "ui/painter.h"
 #include "ui/rp_widget.h"
+#include "ui/ui_utility.h"
 #include "styles/style_media_view.h"
 
 #include <QtGui/QGuiApplication>
@@ -252,7 +256,38 @@ struct MadePrivacyBadge {
 		result.text.append(
 			QString::fromUtf8(" \xE2\x80\xA2 ") + tr::lng_edited(tr::now));
 	}
+	if (data.fromPeer || !data.repostFrom.isEmpty()) {
+		result.text = QString::fromUtf8("\xE2\x80\xA2 ")
+			+ result.text;
+	}
 	return result;
+}
+
+[[nodiscard]] TextWithEntities FromNameValue(not_null<PeerData*> from) {
+	auto result = Ui::Text::SingleCustomEmoji(
+		from->owner().customEmojiManager().peerUserpicEmojiData(
+			from,
+			st::storiesRepostUserpicPadding));
+	result.append(from->name());
+	return Ui::Text::Link(result);
+}
+
+[[nodiscard]] TextWithEntities RepostNameValue(
+		not_null<Data::Session*> owner,
+		PeerData *peer,
+		QString name) {
+	auto result = Ui::Text::SingleCustomEmoji(
+		owner->customEmojiManager().registerInternalEmoji(
+			st::storiesRepostIcon,
+			st::storiesRepostIconPadding));
+	if (peer) {
+		result.append(Ui::Text::SingleCustomEmoji(
+			owner->customEmojiManager().peerUserpicEmojiData(
+				peer,
+				st::storiesRepostUserpicPadding)));
+	}
+	result.append(name);
+	return Ui::Text::Link(result);
 }
 
 } // namespace
@@ -268,23 +303,26 @@ void Header::show(HeaderData data) {
 	if (_data == data) {
 		return;
 	}
-	const auto userChanged = !_data || (_data->user != data.user);
+	const auto peerChanged = !_data || (_data->peer != data.peer);
 	_data = data;
 	const auto updateInfoGeometry = [=] {
 		if (_name && _date) {
 			const auto namex = st::storiesHeaderNamePosition.x();
 			const auto namer = namex + _name->width();
 			const auto datex = st::storiesHeaderDatePosition.x();
-			const auto dater = datex + _date->width();
+			const auto dater = datex
+				+ (_repost ? _repost->width() : 0)
+				+ _date->width();
 			const auto r = std::max(namer, dater);
 			_info->setGeometry({ 0, 0, r, _widget->height() });
 		}
 	};
 	_tooltip = nullptr;
 	_tooltipShown = false;
-	if (userChanged) {
+	if (peerChanged) {
 		_volume = nullptr;
 		_date = nullptr;
+		_repost = nullptr;
 		_name = nullptr;
 		_counter = nullptr;
 		_userpic = nullptr;
@@ -298,12 +336,12 @@ void Header::show(HeaderData data) {
 
 		_info = std::make_unique<Ui::AbstractButton>(raw);
 		_info->setClickedCallback([=] {
-			_controller->uiShow()->show(PrepareShortInfoBox(_data->user));
+			_controller->uiShow()->show(PrepareShortInfoBox(_data->peer));
 		});
 
 		_userpic = std::make_unique<Ui::UserpicButton>(
 			raw,
-			data.user,
+			data.peer,
 			st::storiesHeaderPhoto);
 		_userpic->setAttribute(Qt::WA_TransparentForMouseEvents);
 		_userpic->show();
@@ -313,9 +351,9 @@ void Header::show(HeaderData data) {
 
 		_name = std::make_unique<Ui::FlatLabel>(
 			raw,
-			rpl::single(data.user->isSelf()
+			rpl::single(data.peer->isSelf()
 				? tr::lng_stories_my_name(tr::now)
-				: data.user->name()),
+				: data.peer->name()),
 			st::storiesHeaderName);
 		_name->setAttribute(Qt::WA_TransparentForMouseEvents);
 		_name->setOpacity(kNameOpacity);
@@ -349,6 +387,36 @@ void Header::show(HeaderData data) {
 
 	_date->widthValue(
 	) | rpl::start_with_next(updateInfoGeometry, _date->lifetime());
+
+	if (!data.fromPeer && data.repostFrom.isEmpty()) {
+		_repost = nullptr;
+	} else {
+		_repost = std::make_unique<Ui::FlatLabel>(
+			_widget.get(),
+			st::storiesHeaderDate);
+		const auto prefixName = data.fromPeer
+			? FromNameValue(data.fromPeer)
+			: RepostNameValue(
+				&data.peer->owner(),
+				data.repostPeer,
+				data.repostFrom);
+		const auto prefix = data.fromPeer ? data.fromPeer : data.repostPeer;
+		_repost->setMarkedText(
+			(prefix ? Ui::Text::Link(prefixName) : prefixName),
+			Core::MarkedTextContext{
+				.session = &data.peer->session(),
+				.customEmojiRepaint = [=] { _repost->update(); },
+			});
+		if (prefix) {
+			_repost->setClickHandlerFilter([=](const auto &...) {
+				_controller->uiShow()->show(PrepareShortInfoBox(prefix));
+				return false;
+			});
+		}
+		_repost->show();
+		_repost->widthValue(
+		) | rpl::start_with_next(updateInfoGeometry, _repost->lifetime());
+	}
 
 	auto counter = ComposeCounter(data);
 	if (!counter.isEmpty()) {
@@ -403,9 +471,9 @@ void Header::show(HeaderData data) {
 		_pauseState = _controller->pauseState();
 		applyPauseState();
 	} else {
-		_volume = nullptr;
 		_playPause = nullptr;
 		_volumeToggle = nullptr;
+		_volume = nullptr;
 	}
 
 	rpl::combine(
@@ -433,12 +501,30 @@ void Header::show(HeaderData data) {
 			_counter->move(counterLeft, _name->y());
 		}
 		const auto dateLeft = st::storiesHeaderDatePosition.x();
-		const auto dateAvailable = right - dateLeft;
+		const auto dateTop = st::storiesHeaderDatePosition.y();
+		const auto dateSkip = _repost ? st::storiesHeaderRepostWidthMin : 0;
+		const auto dateAvailable = right - dateLeft - dateSkip;
 		if (dateAvailable <= 0) {
 			_date->hide();
 		} else {
 			_date->show();
 			_date->resizeToNaturalWidth(dateAvailable);
+		}
+		if (_repost) {
+			const auto repostAvailable = dateAvailable
+				+ dateSkip
+				- _date->width();
+			if (repostAvailable <= 0) {
+				_repost->hide();
+			} else {
+				_repost->show();
+				_repost->resizeToNaturalWidth(repostAvailable);
+			}
+			_repost->move(dateLeft, dateTop);
+			const auto space = st::normalFont->spacew;
+			_date->move(dateLeft + _repost->width() + space, dateTop);
+		} else {
+			_date->move(dateLeft, dateTop);
 		}
 	}, _date->lifetime());
 
@@ -605,8 +691,8 @@ void Header::toggleTooltip(Tooltip type, bool show) {
 	}
 	const auto text = [&]() -> TextWithEntities {
 		using Privacy = Data::StoryPrivacy;
-		const auto boldName = Ui::Text::Bold(_data->user->shortName());
-		const auto self = _data->user->isSelf();
+		const auto boldName = Ui::Text::Bold(_data->peer->shortName());
+		const auto self = _data->peer->isSelf();
 		switch (type) {
 		case Tooltip::SilentVideo:
 			return { tr::lng_stories_about_silent(tr::now) };

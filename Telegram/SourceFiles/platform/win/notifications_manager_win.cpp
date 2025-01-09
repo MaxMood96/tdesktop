@@ -10,6 +10,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "window/notifications_utilities.h"
 #include "window/window_session_controller.h"
 #include "base/platform/win/base_windows_co_task_mem.h"
+#include "base/platform/win/base_windows_rpcndr_h.h"
 #include "base/platform/win/base_windows_winrt.h"
 #include "base/platform/base_platform_info.h"
 #include "base/platform/win/wrl/wrl_module_h.h"
@@ -23,6 +24,7 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include "history/history_item.h"
 #include "core/application.h"
 #include "core/core_settings.h"
+#include "lang/lang_keys.h"
 #include "main/main_session.h"
 #include "mainwindow.h"
 #include "windows_quiethours_h.h"
@@ -35,7 +37,6 @@ https://github.com/telegramdesktop/tdesktop/blob/master/LEGAL
 #include <shellapi.h>
 #include <strsafe.h>
 
-#ifndef __MINGW32__
 #include <winrt/Windows.Foundation.h>
 #include <winrt/Windows.Data.Xml.Dom.h>
 #include <winrt/Windows.UI.Notifications.h>
@@ -46,12 +47,9 @@ using namespace winrt::Windows::UI::Notifications;
 using namespace winrt::Windows::Data::Xml::Dom;
 using namespace winrt::Windows::Foundation;
 using winrt::com_ptr;
-#endif // !__MINGW32__
 
 namespace Platform {
 namespace Notifications {
-
-#ifndef __MINGW32__
 namespace {
 
 constexpr auto kQuerySettingsEachMs = 1000;
@@ -107,11 +105,7 @@ crl::time LastSettingsQueryMs/* = 0*/;
 }
 
 bool init() {
-	if (!IsWindows8OrGreater()) {
-		return false;
-	}
-	if ((Dlls::SetCurrentProcessExplicitAppUserModelID == nullptr)
-		|| !base::WinRT::Supported()) {
+	if (!IsWindows8OrGreater() || !base::WinRT::Supported()) {
 		return false;
 	}
 
@@ -122,13 +116,21 @@ bool init() {
 			LOG(("App Error: Object registration failed."));
 		}
 	}
-	if (!AppUserModelId::validateShortcut()) {
+	if (!AppUserModelId::ValidateShortcut()) {
 		LOG(("App Error: Shortcut validation failed."));
 		return false;
 	}
 
-	auto appUserModelId = AppUserModelId::getId();
-	if (!SUCCEEDED(Dlls::SetCurrentProcessExplicitAppUserModelID(appUserModelId))) {
+	PWSTR appUserModelId = {};
+	if (!SUCCEEDED(GetCurrentProcessExplicitAppUserModelID(&appUserModelId))) {
+		return false;
+	}
+
+	const auto appUserModelIdGuard = gsl::finally([&] {
+		CoTaskMemFree(appUserModelId);
+	});
+
+	if (AppUserModelId::Id() != appUserModelId) {
 		return false;
 	}
 	return true;
@@ -304,7 +306,7 @@ void QueryFocusAssist() {
 		}
 		return;
 	}
-	const auto appUserModelId = std::wstring(AppUserModelId::getId());
+	const auto appUserModelId = AppUserModelId::Id();
 	auto blocked = true;
 	const auto guard = gsl::finally([&] {
 		if (FocusAssistBlocks != blocked) {
@@ -361,6 +363,7 @@ bool SkipSoundForCustom() {
 
 	return (UserNotificationState == QUNS_NOT_PRESENT)
 		|| (UserNotificationState == QUNS_PRESENTATION_MODE)
+		|| (FocusAssistBlocks && Core::App().settings().skipToastsInFocus())
 		|| Core::App().screenIsLocked();
 }
 
@@ -369,7 +372,6 @@ bool SkipFlashBounceForCustom() {
 }
 
 } // namespace
-#endif // !__MINGW32__
 
 void MaybePlaySoundForCustom(Fn<void()> playSound) {
 	if (!SkipSoundForCustom()) {
@@ -381,7 +383,8 @@ bool SkipToastForCustom() {
 	QuerySystemNotificationSettings();
 
 	return (UserNotificationState == QUNS_PRESENTATION_MODE)
-		|| (UserNotificationState == QUNS_RUNNING_D3D_FULL_SCREEN);
+		|| (UserNotificationState == QUNS_RUNNING_D3D_FULL_SCREEN)
+		|| (FocusAssistBlocks && Core::App().settings().skipToastsInFocus());
 }
 
 void MaybeFlashBounceForCustom(Fn<void()> flashBounce) {
@@ -397,15 +400,11 @@ bool WaitForInputForCustom() {
 }
 
 bool Supported() {
-#ifndef __MINGW32__
 	if (!Checked) {
 		Checked = true;
 		Check();
 	}
 	return InitSucceeded;
-#endif // !__MINGW32__
-
-	return false;
 }
 
 bool Enforced() {
@@ -417,7 +416,6 @@ bool ByDefault() {
 }
 
 void Create(Window::Notifications::System *system) {
-#ifndef __MINGW32__
 	if (Core::App().settings().nativeNotifications() && Supported()) {
 		auto result = std::make_unique<Manager>(system);
 		if (result->init()) {
@@ -425,11 +423,9 @@ void Create(Window::Notifications::System *system) {
 			return;
 		}
 	}
-#endif // !__MINGW32__
 	system->setManager(nullptr);
 }
 
-#ifndef __MINGW32__
 class Manager::Private {
 public:
 	explicit Private(Manager *instance);
@@ -496,7 +492,7 @@ Manager::Private::Private(Manager *instance)
 bool Manager::Private::init() {
 	return base::WinRT::Try([&] {
 		_notifier = ToastNotificationManager::CreateToastNotifier(
-			AppUserModelId::getId());
+			AppUserModelId::Id());
 	});
 }
 
@@ -984,7 +980,6 @@ void Manager::doMaybeFlashBounce(Fn<void()> flashBounce) {
 		flashBounce();
 	}
 }
-#endif // !__MINGW32__
 
 } // namespace Notifications
 } // namespace Platform
